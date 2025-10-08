@@ -7,6 +7,11 @@ from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 from app.core.config import settings
 from app.models import User, OAuth2Client, AuthorizationCode, Token
+import hashlib
+from fastapi.security import OAuth2PasswordBearer
+import logging
+from fastapi import  HTTPException
+from fastapi.templating import Jinja2Templates
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
