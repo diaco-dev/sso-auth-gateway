@@ -64,7 +64,7 @@ def hash_password(password: str) -> str:
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
-
+#--------------------------------------- basic jwt
 def generate_jwt(user_id: int, client_id: str, scope: str, role: str) -> str:
     payload = {
         "sub": str(user_id),
@@ -77,6 +77,19 @@ def generate_jwt(user_id: int, client_id: str, scope: str, role: str) -> str:
     }
     return jwt.encode(payload, private_key, algorithm=settings.ALGORITHM)
 
+#--------------------------------------- jwt role base
+def generate_jwt_role(user_id: int, client_id: str, scope: str, role: str, audience: str) -> str:
+    payload = {
+        "sub": str(user_id),
+        "client_id": client_id,
+        "scope": scope,
+        "role": role,
+        "aud": audience,
+        "exp": datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+        "iat": datetime.utcnow(),
+        "iss": "oauth-idp",
+    }
+    return jwt.encode(payload, private_key, algorithm=settings.ALGORITHM)
 
 def validate_client(db: Session, client_id: str, client_secret: str) -> bool:
     client = db.query(OAuth2Client).filter(
