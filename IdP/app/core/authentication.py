@@ -91,6 +91,7 @@ def generate_jwt_role(user_id: int, client_id: str, scope: str, role: str, audie
     }
     return jwt.encode(payload, private_key, algorithm=settings.ALGORITHM)
 
+#--------------------------------------- validation client id
 def validate_client(db: Session, client_id: str, client_secret: str) -> bool:
     client = db.query(OAuth2Client).filter(
         OAuth2Client.client_id == client_id,
@@ -98,7 +99,7 @@ def validate_client(db: Session, client_id: str, client_secret: str) -> bool:
     ).first()
     return client and client.client_secret == client_secret
 
-
+#--------------------------------------- authenticate user
 def authenticate_user(db: Session, username: str, password: str) -> User:
     user = db.query(User).filter(User.username == username).first()
     if not user or not verify_password(password, user.password_hash):
@@ -107,7 +108,7 @@ def authenticate_user(db: Session, username: str, password: str) -> User:
         return None
     return user
 
-
+#--------------------------------------- generate code
 def generate_authorization_code(db: Session, client_id: str, user_id: int, scope: str) -> str:
     code = secrets.token_urlsafe(32)
     expires_at = datetime.utcnow() + timedelta(minutes=10)
