@@ -124,7 +124,7 @@ def generate_authorization_code(db: Session, client_id: str, user_id: int, scope
     db.commit()
     return code
 
-
+#--------------------------------------- generate token
 def generate_tokens(db: Session, client_id: str, user_id: int, scope: str, role: str) -> dict:
     access_token = generate_jwt(user_id, client_id, scope, role)
     refresh_token = secrets.token_urlsafe(32)
@@ -149,20 +149,8 @@ def generate_tokens(db: Session, client_id: str, user_id: int, scope: str, role:
         "scope": scope,
     }
 
-def generate_jwt_role(user_id: int, client_id: str, scope: str, role: str, audience: str) -> str:
-    payload = {
-        "sub": str(user_id),
-        "client_id": client_id,
-        "scope": scope,
-        "role": role,
-        "aud": audience,  # <-- اضافه شد
-        "exp": datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
-        "iat": datetime.utcnow(),
-        "iss": "oauth-idp",
-    }
-    return jwt.encode(payload, private_key, algorithm=settings.ALGORITHM)
 
-
+#--------------------------------------- generate token role base
 def generate_tokens_role(db: Session, client_id: str, user_id: int, scope: str, role: str, audience: str) -> dict:
     access_token = generate_jwt_role(user_id, client_id, scope, role, audience)
     refresh_token = secrets.token_urlsafe(32)
