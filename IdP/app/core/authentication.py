@@ -1,81 +1,3 @@
-# from pathlib import Path
-#
-# import jwt
-# from cryptography.hazmat.primitives import serialization
-# from datetime import datetime, timedelta
-# import os
-# from fastapi.security import OAuth2PasswordBearer
-# from .models import User, OAuth2Client, AuthorizationCode, Token
-# from sqlalchemy.orm import Session
-# import secrets
-# from dotenv import load_dotenv
-#
-# # Load environment variables
-# load_dotenv()
-# oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
-#
-# # Load RSA keys
-# BASE_DIR = Path(__file__).resolve().parent
-# KEYS_DIR = BASE_DIR / "keys"
-# KEYS_DIR.mkdir(parents=True, exist_ok=True)
-#
-# PRIVATE_KEY_PATH = os.getenv("PRIVATE_KEY_PATH", KEYS_DIR / "private.pem")
-# PUBLIC_KEY_PATH = os.getenv("PUBLIC_KEY_PATH", KEYS_DIR / "public.pem")
-#
-# with open(PRIVATE_KEY_PATH, "rb") as key_file:
-#     private_key = serialization.load_pem_private_key(key_file.read(), password=None)
-#
-# with open(PUBLIC_KEY_PATH, "rb") as key_file:
-#     public_key = serialization.load_pem_public_key(key_file.read())
-#
-# def generate_jwt(user_id: int, client_id: str, scope: str) -> str:
-#     payload = {
-#         "sub": str(user_id),
-#         "client_id": client_id,
-#         "scope": scope,
-#         "exp": datetime.utcnow() + timedelta(hours=1),
-#         "iat": datetime.utcnow(),
-#     }
-#     return jwt.encode(payload, private_key, algorithm="RS256")
-#
-# def validate_client(db: Session, client_id: str, client_secret: str) -> bool:
-#     client = db.query(OAuth2Client).filter(OAuth2Client.client_id == client_id).first()
-#     return client and client.client_secret == client_secret
-#
-# def generate_authorization_code(db: Session, client_id: str, user_id: int, scope: str) -> str:
-#     code = secrets.token_urlsafe(32)
-#     expires_at = datetime.utcnow() + timedelta(minutes=10)
-#     auth_code = AuthorizationCode(
-#         code=code, client_id=client_id, user_id=user_id, scope=scope, expires_at=expires_at
-#     )
-#     db.add(auth_code)
-#     db.commit()
-#     return code
-#
-# def generate_tokens(db: Session, client_id: str, user_id: int, scope: str) -> dict:
-#     access_token = generate_jwt(user_id, client_id, scope)
-#     refresh_token = secrets.token_urlsafe(32)
-#     expires_at = datetime.utcnow() + timedelta(hours=1)
-#     token = Token(
-#         access_token=access_token,
-#         refresh_token=refresh_token,
-#         client_id=client_id,
-#         user_id=user_id,
-#         scope=scope,
-#         expires_at=expires_at,
-#     )
-#     db.add(token)
-#     db.commit()
-#     return {
-#         "access_token": access_token,
-#         "refresh_token": refresh_token,
-#         "expires_in": 3600,
-#         "token_type": "Bearer",
-#         "scope": scope,
-#     }
-
-#////////////////////////////////////////////////////////
-# authentication.py - Authentication utilities
 import jwt
 import secrets
 from datetime import datetime, timedelta
@@ -90,7 +12,7 @@ from app.models import User, OAuth2Client, AuthorizationCode, Token
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
-# Load RSA keys
+#--------------------------------------- Load RSA keys
 def load_keys():
     keys_dir = Path("../keys")
     keys_dir.mkdir(exist_ok=True)
