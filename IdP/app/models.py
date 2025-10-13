@@ -1,4 +1,3 @@
-# models.py - Complete user and OAuth models
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, Enum
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
@@ -27,16 +26,17 @@ class User(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, index=True)
     username = Column(String(50), unique=True, index=True, nullable=False)
-    email = Column(String(100), unique=True, index=True, nullable=False)
+    email = Column(String(100), unique=True, index=True, nullable=True)
     password_hash = Column(String(255), nullable=False)
     first_name = Column(String(50))
     last_name = Column(String(50))
+    mobile = Column(String(20), unique=True, index=True, nullable=True)
     role = Column(Enum(UserRole), default=UserRole.USER, nullable=False)
     status = Column(Enum(UserStatus), default=UserStatus.ACTIVE, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_login = Column(DateTime)
-
+    is_verified = Column(Boolean, default=False)
     # Relationships
     tokens = relationship("Token", back_populates="user")
     authorization_codes = relationship("AuthorizationCode", back_populates="user")
