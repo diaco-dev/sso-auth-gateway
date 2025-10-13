@@ -1,14 +1,12 @@
-# config.py - Configuration management
 from pydantic_settings import BaseSettings
 from typing import Optional
+from pydantic import computed_field
 
 class Settings(BaseSettings):
     # Application settings
     APP_NAME: str = "FioTrix SSO"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
-    # Environment
-    ENVIRONMENT: str = "development"
 
     # PostgreSQL Database settings
     SSO_POSTGRES_HOST: str
@@ -16,8 +14,14 @@ class Settings(BaseSettings):
     SSO_POSTGRES_USER: str
     SSO_POSTGRES_PASSWORD: str
     SSO_POSTGRES_DB: str
-    DATABASE_URL: Optional[str] = None
-
+    # DATABASE_URL: Optional[str] = None
+    @computed_field
+    @property
+    def DATABASE_URL(self) -> str:
+        return (
+            f"postgresql://{self.SSO_POSTGRES_USER}:{self.SSO_POSTGRES_PASSWORD}"
+            f"@{self.SSO_POSTGRES_HOST}:{self.SSO_POSTGRES_PORT}/{self.SSO_POSTGRES_DB}"
+        )
     # Security
     SECRET_KEY: str
     ALGORITHM: str
@@ -29,58 +33,62 @@ class Settings(BaseSettings):
     PUBLIC_KEY_PATH: str
 
     # CORS
-    ALLOWED_ORIGINS: list = [
-        "http://localhost:3000",
-        "http://localhost:8001",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:8001",
-    ]
+    ALLOWED_ORIGINS: list
     OAUTH_CLIENT_ID: str
     OAUTH_CLIENT_SECRET: str
     OAUTH_REDIRECT_URI: str
 
     # Redis settings
-    REDIS_HOST: str = "localhost"
-    REDIS_PORT: int = 6379
-    REDIS_DB: int = 0
+    REDIS_HOST: str
+    REDIS_PORT: int
+    REDIS_DB: int =0
     REDIS_PASSWORD: Optional[str] = None
-    REDIS_URL: Optional[str] = None
+    # REDIS_URL: Optional[str] = None
 
-    #celery
-    broker_url: str = "redis://localhost:6379/1"
-    result_backend: str = "redis://localhost:6379/1"
+    @computed_field
+    @property
+    def REDIS_URL(self) -> str:
+        if self.REDIS_PASSWORD:
+            return f"redis://:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+
+    # Celery settings
+    @computed_field
+    @property
+    def broker_url(self) -> str:
+        return self.REDIS_URL
+
+    @computed_field
+    @property
+    def result_backend(self) -> str:
+        return self.REDIS_URL
 
     # Email settings
-    EMAIL_HOST: str = "mail.fiotrix.com"
-    EMAIL_PORT: int = 587
-    EMAIL_USE_TLS: bool = True
-    EMAIL_HOST_USER: str = "noreply@fiotrix.com"
-    EMAIL_HOST_PASSWORD: str = "Kgc668@jyD"
+    MAIL_USERNAME: str = "noreply@fiotrix.com"
+    MAIL_PASSWORD: str = "Kgc668@jyD"
+    MAIL_FROM: str = "noreply@fiotrix.com"
+    MAIL_PORT: int = 587         # TLS
+    MAIL_SERVER: str = "62.60.201.127"
+    MAIL_STARTTLS: bool = True
+    MAIL_SSL_TLS: bool = False
+    USE_CREDENTIALS: bool = True
+
 
     farazsms_api_key: str ="GtEUrpID4Zqxvp1uqQWbXgGKorkoe9h8RSbapWPf4Zk="
     farazsms_sender: str ="+983000505"
     FARAZSMS_PATTERN_CODE:str = "x7a68g929i09924"
-
     # Role redirects
-    ROLE_REDIRECTS: dict = {
-        "admin": "http://localhost:3000/admin-dashboard",
-        "staff": "http://localhost:3000/staff-dashboard",
-        "user": "http://localhost:3000/user-dashboard",
+    ROLE_REDIRECTS : dict= {
+        "USER": "https://panel.fiotrix.com/",
+        "ADMIN": "https://ops.fiotrix.com/",
     }
 
+    # Environment
+    ENVIRONMENT: str = "development"
 
     class Config:
         env_file = ".env"
         extra = "ignore"
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-        # Build database URLs
-        if not self.DATABASE_URL:
-            self.DATABASE_URL = (
-                f"postgresql://{self.SSO_POSTGRES_USER}:{self.SSO_POSTGRES_PASSWORD}"
-                f"@{self.SSO_POSTGRES_HOST}:{self.SSO_POSTGRES_PORT}/{self.SSO_POSTGRES_DB}"
-            )
 
 settings = Settings()
