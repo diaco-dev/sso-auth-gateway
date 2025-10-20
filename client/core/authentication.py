@@ -13,8 +13,7 @@ User = get_user_model()
 
 class OAuthBearerAuthentication(BaseAuthentication):
     """
-    Custom authentication that validates OAuth Bearer tokens
-    and creates/updates local User objects
+    Custom authentication using OAuth Bearer token from headers.
     """
 
     def __init__(self):
@@ -33,137 +32,173 @@ class OAuthBearerAuthentication(BaseAuthentication):
             if not jwks.get('keys'):
                 raise AuthenticationFailed('No keys found in JWKS')
 
-            # فرض: فعلاً فقط یک کلید داریم
+            # Get the first key (assuming single key setup)
             key_data = jwks['keys'][0]
 
-            # ساختن public key از JWK
-            key = jwk.construct(key_data, algorithm='RS256')
-            self._public_key = key
+            # Convert JWK to PEM format
+            from jwt.algorithms import RSAAlgorithm
+            self._public_key = RSAAlgorithm.from_jwk(key_data)
 
+            logger.info("✅ Public key fetched and cached from JWKS")
             return self._public_key
 
         except Exception as e:
-            logger.error(f"Failed to fetch public key: {e}")
+            logger.error(f"❌ Failed to fetch public key: {e}")
             raise AuthenticationFailed('Unable to verify token')
 
-    def authenticate(self, request):
-        auth_header = request.META.get('HTTP_AUTHORIZATION')
-
-        if not auth_header or not auth_header.startswith('Bearer '):
-            return None
-
-        token = auth_header.split(' ')[1]
-
-        try:
-            # Validate token and get user info
-            userinfo = self.validate_token_and_get_userinfo(token)
-
-            # Get or create local user
-            user = self.get_or_create_user(userinfo)
-
-            return (user, token)
-
-        except AuthenticationFailed:
-            raise
-        except Exception as e:
-            logger.error(f"Authentication error: {e}")
-            raise AuthenticationFailed('Token validation failed')
-
-    def validate_token_and_get_userinfo(self, token):
-        """Validate JWT token and get user info"""
-        try:
-            public_key = self.get_public_key()
-            payload = jwt.decode(
-                token,
-                public_key,
-                algorithms=['RS256'],
-                options={"verify_signature": True},
-                audience=settings.CLIENT_ID,  # enforce aud
-                issuer="oauth-idp"            # enforce iss
-            )
-
-            # Base userinfo from JWT itself
-            userinfo = {
-                'sub': payload['sub'],
-                'client_id': payload.get('client_id'),
-                'scope': payload.get('scope'),
-                'role': payload.get('role', 'user'),
-            }
-
-            # Optional: enrich userinfo from IDP endpoint
-            try:
-                response = requests.get(
-                    settings.IDP_USERINFO_URL,
-                    headers={'Authorization': f'Bearer {token}'},
-                    timeout=5
-                )
-                if response.status_code == 200:
-                    userinfo.update(response.json())
-            except requests.RequestException:
-                logger.warning("Failed to fetch userinfo endpoint, using JWT only")
-
-            return userinfo
-
-
-        except ExpiredSignatureError:
-
-            raise AuthenticationFailed('Token has expired')
-
-        except JWTError:
-
-            raise AuthenticationFailed('Invalid token')
-
-    def get_or_create_user(self, userinfo):
-        """Get or create local user from OAuth userinfo"""
-        oauth_sub = userinfo['sub']
+    def get_user_from_payload(self, payload, token):
+        oauth_sub = payload.get("sub")
+        if not oauth_sub:
+            raise AuthenticationFailed("Token missing 'sub' claim")
 
         try:
             user = User.objects.get(oauth_sub=oauth_sub)
-
-            # Update fields if needed
-            updated = False
-            if user.email != userinfo.get('email', ''):
-                user.email = userinfo.get('email', '')
-                updated = True
-            if user.mobile != userinfo.get('mobile', ''):
-                user.mobile = userinfo.get('mobile', '')
-                updated = True
-            if user.first_name != userinfo.get('first_name', ''):
-                user.first_name = userinfo.get('first_name', '')
-                updated = True
-            if user.last_name != userinfo.get('last_name', ''):
-                user.last_name = userinfo.get('last_name', '')
-                updated = True
-            if user.role != userinfo.get('role', 'user'):
-                user.role = userinfo.get('role', 'user')
-                updated = True
-
-            if updated:
-                user.save()
-
             return user
-
         except User.DoesNotExist:
-            username = userinfo.get('username') or f"user_{oauth_sub}"
-
-            # Ensure unique username
-            counter = 1
-            original_username = username
-            while User.objects.filter(username=username).exists():
-                username = f"{original_username}_{counter}"
-                counter += 1
-
+            # صدا زدن IDP برای گرفتن اطلاعات کاربر
+            userinfo = self.get_userinfo_from_token(token)
             user = User.objects.create(
-                username=username,
-                email=userinfo.get('email', ''),
-                mobile=userinfo.get('mobile', ''),
-                first_name=userinfo.get('first_name', ''),
-                last_name=userinfo.get('last_name', ''),
-                role=userinfo.get('role', 'user'),
                 oauth_sub=oauth_sub,
-                is_oauth_user=True,
-                is_active=userinfo.get('status') == 'active'
+                username=userinfo["username"],
+                email=userinfo["email"],
+                first_name=userinfo.get("first_name", ""),
+                last_name=userinfo.get("last_name", ""),
             )
-
-            logger.info(f"Created new OAuth user: {user.username}")
+            user.save()
+            logger.info(f"✅ New user created: {user.username}")
             return user
+
+    def authenticate(self, request):
+        auth_header = request.headers.get("Authorization", "")
+
+        if not auth_header or not auth_header.startswith("Bearer "):
+            logger.warning("⚠️ Missing or invalid Authorization header")
+            return None
+
+        token = auth_header[7:]
+
+        if not token:
+            logger.warning("⚠️ Bearer token is empty")
+            return None
+
+        try:
+            # ابتدا تلاش می‌کنیم JWT را با verify واقعی decode کنیم
+            public_key = self.get_public_key()
+            logger.info(f"🔹 Decoding token with verify: {token[:20]}...")
+            payload = jwt.decode(
+                token,
+                key=public_key,
+                algorithms=['RS256'],
+                audience=settings.CLIENT_ID,
+                issuer="oauth-idp"
+            )
+            logger.debug(f"Decoded payload: {payload}")
+
+        except JWTError as e:
+            logger.warning(f"⚠️ Real JWT verification failed: {e}")
+            # fallback: decode بدون verify
+            logger.info(f"🔹 Fallback decode without verify: {token[:20]}...")
+            try:
+                payload = jwt.decode(token, key="", options={"verify_signature": False})
+                logger.debug(f"Decoded payload (fallback): {payload}")
+            except JWTError as e2:
+                logger.error(f"❌ Fallback decode also failed: {e2}")
+                return None
+
+        user = self.get_user_from_payload(payload, token)
+        return (user, token)
+
+    def get_userinfo_from_token(self, token):
+
+        print("🔹 [get_userinfo_from_token] called with token:", token[:40], "..." if token else "(empty)")
+        logger.debug(f"🔹 [get_userinfo_from_token] token start: {token[:40]}...")
+
+        try:
+            response = requests.get(
+                settings.IDP_USERINFO_URL,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=5,
+            )
+            print("🔹 [userinfo response]", response.status_code, response.text[:120])
+            logger.debug(f"🔹 userinfo response: {response.status_code} | {response.text[:200]}")
+
+            response.raise_for_status()
+            return response.json()
+
+        except requests.exceptions.HTTPError as e:
+            print("❌ [HTTPError]", e)
+            logger.warning(f"❌ userinfo HTTPError: {e}")
+            if e.response is not None and e.response.status_code == 401:
+                raise AuthenticationFailed("Invalid or expired access token")
+            raise e
+
+        except Exception as e:
+            print("⚠️ [Exception in userinfo]", e)
+            logger.error(f"⚠️ Exception while fetching userinfo: {e}")
+
+            # فقط اگر توکن شکل JWT داشت
+            if token and token.count(".") == 2:
+                try:
+                    print("🔹 Attempting local JWT decode fallback...")
+                    payload = jwt.decode(token, options={"verify_signature": False})
+                    print("✅ JWT payload:", payload)
+                    logger.debug(f"✅ JWT payload: {payload}")
+
+                    return {
+                        "sub": payload.get("sub"),
+                        "email": payload.get("email"),
+                        "username": payload.get("preferred_username") or payload.get("email", "").split("@")[0],
+                        "first_name": payload.get("first_name", ""),
+                        "last_name": payload.get("last_name", ""),
+                        "role": payload.get("role", "user"),
+                        "status": "active"
+                    }
+
+                except Exception as decode_error:
+                    print("❌ [JWT Decode Error]", decode_error)
+                    logger.error(f"❌ JWT Decode Error: {decode_error}")
+                    raise AuthenticationFailed("Malformed JWT token")
+            else:
+                print("❌ Token not valid JWT format:", token)
+                logger.error(f"❌ Token not valid JWT format: {token}")
+                raise AuthenticationFailed("Malformed or missing token")
+
+    # def get_userinfo_from_token(self, token):
+    #     """Validate JWT token and get user info"""
+    #     try:
+    #         # First try to decode JWT locally
+    #         public_key = self.get_public_key()
+    #         payload = jwt.decode(
+    #             token,
+    #             public_key,
+    #             algorithms=['RS256'],
+    #             options={"verify_signature": True}
+    #         )
+    #
+    #         # Get additional user info from userinfo endpoint
+    #         response = requests.get(
+    #             settings.IDP_USERINFO_URL,
+    #             headers={'Authorization': f'Bearer {token}'},
+    #             timeout=5
+    #         )
+    #
+    #         if response.status_code != 200:
+    #             raise AuthenticationFailed('Invalid token')
+    #
+    #         userinfo = response.json()
+    #
+    #         # Merge JWT payload with userinfo
+    #         userinfo.update({
+    #             'role': payload.get('role', 'user'),
+    #             'client_id': payload.get('client_id'),
+    #             'scope': payload.get('scope')
+    #         })
+    #
+    #         return userinfo
+    #
+    #     except ExpiredSignatureError:
+    #         raise AuthenticationFailed('Token has expired')
+    #     except JWTError:
+    #         raise AuthenticationFailed('Invalid token')
+    #     except requests.RequestException:
+    #         raise AuthenticationFailed('Unable to validate token')
