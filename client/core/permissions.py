@@ -1,5 +1,3 @@
-# permissions.py - Role - based
-# permissions
 from rest_framework.permissions import BasePermission
 
 
