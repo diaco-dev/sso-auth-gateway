@@ -14,6 +14,8 @@ import logging
 from fastapi import  HTTPException
 from fastapi.templating import Jinja2Templates
 
+from app.schemas import LoginResponse
+
 # --------------------logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -112,88 +114,14 @@ def authenticate_email_mobile(db: Session, email_or_mobile: str, password: str) 
         return None
     return user
 
-#--------------------------------------- generate code
-def generate_authorization_code(db: Session, client_id: str, user_id: int, scope: str) -> str:
-    code = secrets.token_urlsafe(32)
-    expires_at = datetime.utcnow() + timedelta(minutes=10)
-
-    auth_code = AuthorizationCode(
-        code=code,
-        client_id=client_id,
-        user_id=user_id,
-        scope=scope,
-        expires_at=expires_at
-    )
-    db.add(auth_code)
-    db.commit()
-    return code
-
-#--------------------------------------- generate basic jwt
-# --------------- V2
-def generate_jwt(user_id: int, client_id: str, scope: str, role: str) -> str:
-    jti = str(uuid.uuid4())
-
-    payload = {
-        "sub": str(user_id),
-        "client_id": client_id,
-        "scope": scope,
-        "role": role,
-        "aud": client_id,
-        "jti": jti,
-        "exp": datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
-        "iat": datetime.utcnow(),
-        "iss": "oauth-idp",
-    }
-    return jwt.encode(payload, private_key, algorithm=settings.ALGORITHM)
-
-
-#v1
-# def generate_jwt(user_id: int, client_id: str, scope: str, role: str) -> str:
-#     payload = {
-#         "sub": str(user_id),
-#         "client_id": client_id,
-#         "scope": scope,
-#         "role": role,
-#         "exp": datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
-#         "iat": datetime.utcnow(),
-#         "iss": "oauth-idp",
-#     }
-#     return jwt.encode(payload, private_key, algorithm=settings.ALGORITHM)
-
-#--------------------------------------- generate token
-def generate_tokens(db: Session, client_id: str, user_id: int, scope: str, role: str) -> dict:
-    access_token = generate_jwt(user_id, client_id, scope, role)
-    refresh_token = secrets.token_urlsafe(64)
-    expires_at = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-
-    token = Token(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        client_id=client_id,
-        user_id=user_id,
-        scope=scope,
-        expires_at=expires_at
-    )
-    db.add(token)
-    db.commit()
-
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        "token_type": "Bearer",
-        "scope": scope,
-    }
-
-
 #--------------------------------------- generate jwt role base
-def generate_jwt_role(user_id: int, client_id: str, scope: str, role: str, audience: str) -> str:
+def generate_jwt_role(user_id: int, client_id: str, scope: str, role: str) -> str:
     payload = {
         "sub": str(user_id),
         "client_id": client_id,
         "scope": scope,
         "role": role,
-        "aud": audience,  # <-- اضافه شد
+        "aud": client_id,  # <-- اضافه شد
         "exp": datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
         "iat": datetime.utcnow(),
         "iss": "oauth-idp",
@@ -201,8 +129,8 @@ def generate_jwt_role(user_id: int, client_id: str, scope: str, role: str, audie
     return jwt.encode(payload, private_key, algorithm=settings.ALGORITHM)
 
 #--------------------------------------- generate token role base
-def generate_tokens_role(db: Session, client_id: str, user_id: int, scope: str, role: str, audience: str) -> dict:
-    access_token = generate_jwt_role(user_id, client_id, scope, role, audience)
+def generate_tokens_role(db: Session, client_id: str, user_id: int, scope: str, role: str) -> dict:
+    access_token = generate_jwt_role(user_id, client_id, scope, role)
     refresh_token = secrets.token_urlsafe(32)
     expires_at = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
 
@@ -225,8 +153,67 @@ def generate_tokens_role(db: Session, client_id: str, user_id: int, scope: str, 
         "scope": scope,
     }
 
-#-----------------------------------common function for generating response------------------------------
-def build_login_response(db: Session, user: User, scope: str, state: str | None = None):
+#--------------------------------------- generate code
+def generate_authorization_code(db: Session, client_id: str, user_id: int, scope: str) -> str:
+    code = secrets.token_urlsafe(32)
+    # expires_at = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    expires_at = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    auth_code = AuthorizationCode(
+        code=code,
+        client_id=client_id,
+        user_id=user_id,
+        scope=scope,
+        expires_at=expires_at
+    )
+    db.add(auth_code)
+    db.commit()
+    return code
+
+def generate_tokens(db: Session, client_id: str, user_id: int, scope: str, role: str) -> dict:
+    access_token = generate_jwt(user_id, client_id, scope, role)
+    refresh_token = secrets.token_urlsafe(64)
+
+    # access token کوتاه مدت
+    access_expires = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+
+    # refresh token بلند مدت
+    refresh_expires = datetime.utcnow() + timedelta(minutes=settings.REFRESH_TOKEN_EXPIRE_MINUTES)
+
+    token = Token(
+        access_token=access_token,
+        refresh_token=hash_token(refresh_token),
+        client_id=client_id,
+        user_id=user_id,
+        scope=scope,
+        expires_at=refresh_expires,  # 🔹 برای refresh بلند مدت
+        revoked=False,
+    )
+    db.add(token)
+    db.commit()
+
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES,
+        "token_type": "Bearer",
+        "scope": scope,
+    }
+
+def generate_jwt(user_id: int, client_id: str, scope: str, role: str) -> str:
+    payload = {
+        "sub": str(user_id),
+        "client_id": client_id,
+        "scope": scope,
+        "role": role,
+        "exp": datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+        "iat": datetime.utcnow(),
+        "iss": "oauth-idp",
+        "aud": settings.OAUTH_CLIENT_ID,
+    }
+    print(f"🧩 [generate_jwt] payload: {payload}")
+    return jwt.encode(payload, private_key, algorithm=settings.ALGORITHM)
+
+def build_login_response(db: Session, user: User, scope: str, state: str):
     # Update last login
     user.last_login = datetime.utcnow()
     db.commit()
@@ -235,24 +222,20 @@ def build_login_response(db: Session, user: User, scope: str, state: str | None 
     role = str(user.role.value).upper()
 
     redirect_url = settings.ROLE_REDIRECTS.get(role)
-    if not redirect_url:
-        raise HTTPException(
-            status_code=400,
-            detail=f"No panel defined for this role: {role}"
-        )
 
     # Generate authorization code internally (برای SSO)
     auth_code = generate_authorization_code(db, settings.OAUTH_CLIENT_ID, user.id, scope)
 
-    tokens = generate_tokens_role(
+    # Generate tokens
+    tokens = generate_tokens(
         db=db,
         client_id=settings.OAUTH_CLIENT_ID,
         user_id=user.id,
         scope=scope,
-        role=role,
-        audience=role
+        role=role
     )
 
+    # Mark code as used
     code_obj = db.query(AuthorizationCode).filter(
         AuthorizationCode.code == auth_code
     ).first()
@@ -270,13 +253,14 @@ def build_login_response(db: Session, user: User, scope: str, state: str | None 
         "status": user.status.value
     }
 
-    return {
-        "access_token": tokens["access_token"],
-        "refresh_token": tokens["refresh_token"],
-        "expires_in": tokens["expires_in"],
-        "token_type": "Bearer",
-        "user": user_info,
-        "scope": tokens["scope"],
-        "state": state or secrets.token_urlsafe(32),
-        "redirect_url": redirect_url,
-    }
+    # Return Pydantic model
+    return LoginResponse(
+        access_token=tokens["access_token"],
+        refresh_token=tokens["refresh_token"],
+        expires_in=tokens["expires_in"],
+        token_type="Bearer",
+        user=user_info,
+        scope=tokens["scope"],
+        state=state,
+        redirect_url=redirect_url
+    )
