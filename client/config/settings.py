@@ -87,20 +87,20 @@ DATABASES = {
 }
 
 # Password validation
-# AUTH_PASSWORD_VALIDATORS = [
-#     {
-#         'NAME': 'django.contrib.core.password_validation.UserAttributeSimilarityValidator',
-#     },
-#     {
-#         'NAME': 'django.contrib.core.password_validation.MinimumLengthValidator',
-#     },
-#     {
-#         'NAME': 'django.contrib.core.password_validation.CommonPasswordValidator',
-#     },
-#     {
-#         'NAME': 'django.contrib.core.password_validation.NumericPasswordValidator',
-#     },
-# ]
+AUTH_PASSWORD_VALIDATORS = [
+    {
+        'NAME': 'django.contrib.core.password_validation.UserAttributeSimilarityValidator',
+    },
+    {
+        'NAME': 'django.contrib.core.password_validation.MinimumLengthValidator',
+    },
+    {
+        'NAME': 'django.contrib.core.password_validation.CommonPasswordValidator',
+    },
+    {
+        'NAME': 'django.contrib.core.password_validation.NumericPasswordValidator',
+    },
+]
 
 
 # Internationalization
@@ -211,27 +211,47 @@ REST_FRAMEWORK = {
     ],
 }
 
+#SWAGGER
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'FioTriX API Documentation',
+    'DESCRIPTION': 'API documentation for fiotrix-services_app',
+    'VERSION': '1.0.0',
 
-# Logging
+    'SERVE_INCLUDE_SCHEMA': True,
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'COMPONENT_SPLIT_REQUEST': True,
+
+    'SWAGGER_UI_SETTINGS': {
+        'deepLinking': True,
+        'persistAuthorization': True,
+    },
+
+    'SECURITY': [{'BearerAuth': []}],
+    'COMPONENTS': {
+        'securitySchemes': {
+            'BearerAuth': {
+                'type': 'http',
+                'scheme': 'bearer',
+                'bearerFormat': 'JWT',
+            }
+        }
+    },
+
+    'ENUM_NAME_OVERRIDES': {},
+    'TAG_SORTING': 'alpha',
+}
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'handlers': {
-        'file': {
-            'level': 'INFO',
-            'class': 'logging.FileHandler',
-            'filename': 'logs/django.log',
-        },
         'console': {
-            'level': 'INFO',
             'class': 'logging.StreamHandler',
         },
     },
     'loggers': {
-        'tasks': {
-            'handlers': ['file', 'console'],
+        '__name__': {
+            'handlers': ['console'],
             'level': 'INFO',
-            'propagate': True,
         },
     },
 }
