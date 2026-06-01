@@ -1,65 +1,233 @@
 # SSO Authentication Gateway
 
-The SSO Authentication Gateway is a production-ready authentication solution designed to provide secure Single Sign-On (SSO) functionality across multiple subdomains. Built with **FastAPI**, it leverages **JWT (RS256)** and **cookie-based authentication** to support role-based redirects, token management, and robust security practices, ensuring a seamless and secure user experience.
+A production-grade authentication gateway built with [FastAPI](https://fastapi.tiangolo.com/?utm_source=chatgpt.com) that provides centralized Single Sign-On (SSO) across multiple applications and subdomains.
 
-## Features
+The gateway acts as an Identity Provider (IdP), allowing external services and client applications to authenticate users through a unified authentication system. It supports secure JWT-based authentication, refresh token rotation, cross-subdomain session management, and role-based access control.
 
-- **Role-Based Authentication and Redirection**  
-  Redirects users to role-specific subdomains (e.g., `staff.yourdomain.com`, `admin.yourdomain.com`) upon successful login.
-- **JWT Access Tokens**  
-  Short-lived tokens signed with the **RS256** algorithm using public/private key pairs for enhanced security.
-- **Refresh Tokens**  
-  Long-lived tokens stored as SHA-256 hashes in the database, supporting rotation and revocation to prevent replay attacks.
-- **HttpOnly Cookies**  
-  Tokens are stored in cookies with the following attributes:  
-  - `HttpOnly` to prevent client-side script access  
-  - `Secure` to ensure transmission over HTTPS  
-  - `SameSite=None` to enable cross-subdomain functionality  
-  - `Domain=.yourdomain.com` for seamless subdomain sharing  
-- **Logout Functionality**  
-  Revokes refresh tokens and clears cookies to terminate user sessions securely.
-- **CSRF Protection**  
-  Optional CSRF tokens for state-changing requests to mitigate cross-site request forgery attacks.
-- **Rate Limiting**  
-  Protects the login endpoint against brute-force attacks.
-- **JWKS Endpoint**  
-  Exposes public keys for token verification across services.
-- **Production-Ready Security**  
-  Enforces HTTPS, implements HTTP Strict Transport Security (HSTS), includes secure headers, and maintains audit logs.
+Typical client applications include:
 
-## Technology Stack
+* Django / DRF applications
+* FastAPI services
+* React / Next.js frontends
+* Internal admin panels
+* Microservices architectures
 
-- **FastAPI**: High-performance Python framework for building the API.  
-- **PostgreSQL**: Relational database for storing user and token data.  
-- **Redis**: Optional in-memory store for token blacklisting and session revocation.  
-- **SQLAlchemy**: Object-Relational Mapping (ORM) for database interactions.  
-- **Python-Jose**: Library for JWT signing and validation.  
-- **Nginx**: Configured for TLS termination and reverse proxy functionality.
+---
 
-## Project Structure
+# Features
 
+## Centralized SSO Authentication
+
+Authenticate users once and share authenticated sessions across multiple services and subdomains.
+
+Example:
+
+* `admin.example.com`
+* `staff.example.com`
+* `dashboard.example.com`
+
+---
+![Project Architecture](login.png)
+
+---
+## Identity Provider (IdP)
+
+The gateway functions as an authentication provider for external applications.
+
+Client applications can:
+
+* Redirect users to the SSO provider
+* Validate JWT access tokens
+* Refresh sessions securely
+* Retrieve public signing keys via JWKS
+
+---
+
+## JWT Authentication (RS256)
+
+Uses asymmetric cryptography with RS256 public/private key signing.
+
+Benefits:
+
+* Stateless access token validation
+* Secure inter-service authentication
+* Public key verification without exposing private keys
+
+---
+
+## Refresh Token Rotation
+
+Implements secure refresh token rotation:
+
+* Long-lived refresh tokens
+* SHA-256 hashed storage
+* Automatic rotation
+* Revocation support
+* Replay attack mitigation
+
+---
+
+## Secure Cookie-Based Authentication
+
+Authentication tokens are stored in secure HttpOnly cookies.
+
+Cookie configuration:
+
+* `HttpOnly`
+* `Secure`
+* `SameSite=None`
+* `Domain=.yourdomain.com`
+
+Supports seamless authentication across subdomains.
+
+---
+
+## Role-Based Access Control
+
+Users can be redirected automatically based on roles.
+
+Example:
+
+* `admin` → `admin.example.com`
+* `staff` → `staff.example.com`
+
+---
+
+## Logout & Session Revocation
+
+Secure logout flow:
+
+* Refresh token revocation
+* Session invalidation
+* Cookie cleanup
+
+---
+
+## JWKS Endpoint
+
+Exposes public signing keys through a JWKS endpoint for external service verification.
+
+Useful for:
+
+* Microservices
+* API gateways
+* Third-party integrations
+* Distributed architectures
+
+---
+
+## CSRF Protection
+
+Optional CSRF protection for state-changing requests.
+
+---
+
+## Rate Limiting
+
+Protects authentication endpoints against:
+
+* Brute-force attacks
+* Credential stuffing
+* Abuse attempts
+
+---
+
+## Production Security Practices
+
+Includes:
+
+* HTTPS enforcement
+* HSTS headers
+* Secure cookie policies
+* Audit logging
+* Secret-based key management
+* Reverse proxy support via Nginx
+
+---
+
+# Architecture
+
+```text
+                    ┌────────────────────┐
+                    │   Client App       │
+                    │  (DRF / React)     │
+                    └─────────┬──────────┘
+                              │
+                              │ Redirect/Login
+                              ▼
+                    ┌────────────────────┐
+                    │  SSO Gateway       │
+                    │   FastAPI IdP      │
+                    └─────────┬──────────┘
+                              │
+          ┌───────────────────┴───────────────────┐
+          │                                       │
+          ▼                                       ▼
+ ┌──────────────────┐                   ┌──────────────────┐
+ │   PostgreSQL     │                   │      Redis       │
+ │ Users & Tokens   │                   │ Revocation Cache │
+ └──────────────────┘                   └──────────────────┘
 ```
-sso-auth-gateway/
+
+---
+
+# Technology Stack
+
+| Component          | Technology                                                                   |
+| ------------------ | ---------------------------------------------------------------------------- |
+| API Framework      | [FastAPI](https://fastapi.tiangolo.com/?utm_source=chatgpt.com)              |
+| Database           | [PostgreSQL](https://www.postgresql.org/?utm_source=chatgpt.com)             |
+| Cache / Revocation | [Redis](https://redis.io/?utm_source=chatgpt.com)                            |
+| ORM                | [SQLAlchemy](https://www.sqlalchemy.org/?utm_source=chatgpt.com)             |
+| JWT Library        | [python-jose](https://github.com/mpdavis/python-jose?utm_source=chatgpt.com) |
+| Reverse Proxy      | [Nginx](https://nginx.org/?utm_source=chatgpt.com)                           |
+| Migrations         | [Alembic](https://alembic.sqlalchemy.org/?utm_source=chatgpt.com)            |
+
+---
+
+# Project Structure
+
+```text
+root project (idp)/
 │
 ├── app/
-│   ├── main.py             # FastAPI application entry point
-│   ├── auth.py            # JWT and token management utilities
-│   ├── routes/
-│   │   ├── auth.py        # Endpoints for login, refresh, and logout
-│   │   └── jwks.py        # JWKS endpoint for public key exposure
-│   ├── models.py          # SQLAlchemy models (User, RefreshToken)
-│   ├── deps.py            # Authentication dependencies
-│   └── config.py          # Configuration settings loaded from .env
+│   ├── main.py
+│   ├── models.py
+│   ├── models.py
+│   ├── core/
+│   │   ├── authentication.py
+│   │   ├── config.py
+│   │   └── databae.py
+│   │
+│   ├── keys/
+│   │   ├── private.pem
+│   │   └── public.pem
+│   │
+│   ├── routers/
+│   │   ├── auth.py
+│   │   └── core.py
+│   │
+│   ├── tasks/
+│   │   ├── celery.py
+│   │   ├── redis.py
+│   │   └── tass.py
+│   │
+│   ├── templates/
+│   │   └── login.html
+│   │
+│   └── utils/
+│       └── ......
 │
-├── migrations/            # Alembic database migration scripts
-├── .env.example           # Example environment variable configuration
-├── requirements.txt       # Project dependencies
-└── README.md              # Project documentation
+├── migrations/
+├── requirements.txt
+├── .env.example
+├── docker-compose.yml
+└── README.md
 ```
 
-## Environment Variables
+---
 
-The project relies on environment variables for configuration. Below is an example configuration based on `.env.example`:
+# Environment Variables
 
 ```env
 # JWT Configuration
@@ -67,76 +235,218 @@ JWT_PRIVATE_KEY_PATH=/run/secrets/jwt_private.pem
 JWT_PUBLIC_KEY_PATH=/run/secrets/jwt_public.pem
 JWT_ALGORITHM=RS256
 
-# Token Expiry
+# Token Expiration
 ACCESS_TOKEN_EXPIRE_MINUTES=15
 REFRESH_TOKEN_EXPIRE_DAYS=30
 
-# Cookie Settings
+# Cookie Configuration
 COOKIE_DOMAIN=.yourdomain.com
 COOKIE_SECURE=true
 
-# Database and Redis Connections
-DATABASE_URL=postgresql://user:pass@localhost:5432/sso_db
+# Database
+DATABASE_URL=postgresql://user:password@localhost:5432/sso_db
+
+# Redis
 REDIS_URL=redis://localhost:6379/0
 ```
 
-## Authentication Flow
+---
 
-1. **Login**  
-   - **Request**: `POST /api/login` with username and password.  
-   - **Process**: The backend verifies credentials and determines the user's role.  
-   - **Response**: Generates access and refresh tokens, sets them in HttpOnly cookies, and returns a redirect URL for the role-specific panel.  
+# Authentication Flow
 
-2. **Accessing Protected Routes**  
-   - The browser automatically sends the access token cookie with each request.  
-   - The backend validates the JWT for every protected endpoint.  
+## 1. Login
 
-3. **Token Refresh**  
-   - **Request**: `POST /api/refresh` when the access token expires.  
-   - **Process**: The refresh token is validated, rotated, and new access and refresh tokens are issued.  
+Client application redirects the user to the SSO provider.
 
-4. **Logout**  
-   - **Request**: `POST /api/logout`.  
-   - **Process**: Revokes the refresh token and clears cookies to terminate the session.
+```http
+POST /api/auth/login
+```
 
-## Running the Project Locally
+The gateway:
 
-Follow these steps to set up and run the project on a local development environment:
+1. Validates credentials
+2. Determines user roles
+3. Issues access & refresh tokens
+4. Stores tokens in secure cookies
+5. Returns redirect target
 
-1. **Clone the Repository**  
-   ```bash
-   git clone https://github.com/your-org/sso-auth-gateway.git
-   cd sso-auth-gateway
-   ```
+---
 
-2. **Create a Virtual Environment**  
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-   ```
+## 2. Access Protected Resources
 
-3. **Install Dependencies**  
-   ```bash
-   pip install -r requirements.txt
-   ```
+The browser automatically sends authentication cookies with requests.
 
-4. **Run Database Migrations**  
-   ```bash
-   alembic upgrade head
-   ```
+Protected services:
 
-5. **Start the Development Server**  
-   ```bash
-   uvicorn app.main:app --reload
-   ```
+* Validate JWT access tokens
+* Verify token signatures using JWKS
+* Extract user claims and roles
 
-## Security Checklist
+---
 
-The following security measures are implemented to ensure a robust and secure system:
+## 3. Token Refresh
 
-- ✅ **HTTPS Enforcement**: TLS is mandatory in production environments.  
-- ✅ **HSTS Headers**: Enforces secure connections over time.  
-- ✅ **Rate Limiting**: Protects the login endpoint from brute-force attacks.  
-- ✅ **Refresh Token Rotation and Revocation**: Prevents token reuse and ensures session invalidation.  
-- ✅ **Secure Cookies**: Configured with `HttpOnly`, `Secure`, `SameSite=None`, and `Domain=.yourdomain.com`.  
-- ✅ **Key Management**: Cryptographic keys are stored securely in a secret manager, not in version control.
+```http
+POST /api/auth/refresh
+```
+
+When the access token expires:
+
+1. Refresh token is validated
+2. Old refresh token is revoked
+3. New token pair is generated
+4. Cookies are updated
+
+---
+
+## 4. Logout
+
+```http
+POST /api/auth/logout
+```
+
+The logout process:
+
+* Revokes refresh tokens
+* Invalidates sessions
+* Clears authentication cookies
+
+---
+
+# DRF Client Integration Example
+
+A Django REST Framework application can use the gateway as its authentication provider.
+
+## Example Flow
+
+```text
+User → DRF App → Redirect to SSO Gateway
+                     ↓
+               User Authenticated
+                     ↓
+        JWT Tokens Issued by FastAPI IdP
+                     ↓
+         DRF Validates Access Token
+                     ↓
+              User Logged In
+```
+
+---
+
+## DRF JWT Validation
+
+Example DRF middleware/authentication integration:
+
+```python
+from jose import jwt
+from django.conf import settings
+
+def verify_access_token(token: str):
+    payload = jwt.decode(
+        token,
+        settings.SSO_PUBLIC_KEY,
+        algorithms=["RS256"]
+    )
+
+    return payload
+```
+
+---
+
+# Running Locally
+
+## Clone Repository
+
+```bash
+git clone https://github.com/your-org/sso-auth-gateway.git
+cd sso-auth-gateway
+```
+
+---
+
+## Create Virtual Environment
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+```
+
+Windows:
+
+```bash
+.venv\Scripts\activate
+```
+
+---
+
+## Install Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+## Run Database Migrations
+
+```bash
+alembic upgrade head
+```
+
+---
+
+## Start Development Server
+
+```bash
+uvicorn app.main:app --reload
+```
+
+---
+
+# Security Checklist
+
+| Security Feature         | Status |
+| ------------------------ | ------ |
+| HTTPS Enforcement        | ✅      |
+| HSTS Headers             | ✅      |
+| HttpOnly Cookies         | ✅      |
+| Secure Cookies           | ✅      |
+| SameSite=None Cookies    | ✅      |
+| Refresh Token Rotation   | ✅      |
+| Refresh Token Revocation | ✅      |
+| RS256 JWT Signing        | ✅      |
+| Rate Limiting            | ✅      |
+| CSRF Protection          | ✅      |
+| Audit Logging            | ✅      |
+| Secret-Based Key Storage | ✅      |
+
+---
+
+# Recommended Deployment
+
+Production deployment recommendation:
+
+* FastAPI application
+* PostgreSQL database
+* Redis revocation cache
+* Nginx reverse proxy
+* Dockerized infrastructure
+* TLS termination at Nginx
+
+---
+
+# Use Cases
+
+* Enterprise SSO systems
+* Internal company platforms
+* Multi-tenant SaaS applications
+* Microservices authentication
+* Cross-subdomain authentication
+* Centralized authentication provider
+* API gateway authentication
+
+---
+
+# License
+
+MIT License
