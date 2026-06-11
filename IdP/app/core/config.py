@@ -1,3 +1,4 @@
+# config.py - Configuration management
 from pydantic_settings import BaseSettings
 from typing import Optional
 from pydantic import computed_field
@@ -27,6 +28,7 @@ class Settings(BaseSettings):
     ALGORITHM: str
     ACCESS_TOKEN_EXPIRE_MINUTES: int
     REFRESH_TOKEN_EXPIRE_DAYS: int
+    REFRESH_TOKEN_EXPIRE_MINUTES : int
 
     # Keys
     PRIVATE_KEY_PATH: str
@@ -65,18 +67,18 @@ class Settings(BaseSettings):
 
     # Email settings
     MAIL_USERNAME: str = "noreply@fiotrix.com"
-    MAIL_PASSWORD: str = "Kgc668@jyD"
+    MAIL_PASSWORD: str
     MAIL_FROM: str = "noreply@fiotrix.com"
     MAIL_PORT: int = 587         # TLS
-    MAIL_SERVER: str = "62.60.201.127"
+    MAIL_SERVER: str
     MAIL_STARTTLS: bool = True
     MAIL_SSL_TLS: bool = False
     USE_CREDENTIALS: bool = True
 
-
-    farazsms_api_key: str ="GtEUrpID4Zqxvp1uqQWbXgGKorkoe9h8RSbapWPf4Zk="
+    farazsms_api_key: str
     farazsms_sender: str ="+983000505"
-    FARAZSMS_PATTERN_CODE:str = "x7a68g929i09924"
+    FARAZSMS_PATTERN_CODE:str
+
     # Role redirects
     ROLE_REDIRECTS : dict= {
         "USER": "https://panel.fiotrix.com/",
@@ -89,6 +91,5 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         extra = "ignore"
-
 
 settings = Settings()
