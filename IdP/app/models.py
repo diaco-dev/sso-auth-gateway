@@ -1,3 +1,4 @@
+# models.py - Complete user and OAuth models
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, Enum
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
@@ -85,6 +86,8 @@ class Token(Base):
     expires_at = Column(DateTime, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     audience = Column(String(100))
+    revoked = Column(Boolean, default=False)
+    replaced_by = Column(String, nullable=True)
     # Relationships
     user = relationship("User", back_populates="tokens")
     client = relationship("OAuth2Client")
