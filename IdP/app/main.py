@@ -1,68 +1,148 @@
 # main.py - FastAPI application
-from fastapi import FastAPI, Depends, HTTPException, Form, Request
-from fastapi.templating import Jinja2Templates
+from fastapi import FastAPI, Form, Request, Depends
+from fastapi.exceptions import RequestValidationError
+from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordBearer
 import json
-from app.core.database import get_db, engine
+from app.core.database import engine, get_db
 from .models import Base
 from .schemas import *
 from app.core.authentication import *
 from app.core.config import settings
+from jose import jwt, JWTError
+from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBearer
+from .utils.exception import http_exception_handler, request_validation_exception_handler, general_exception_handler
+# Routers
+from app.routers.auth import router as auth_router
+from app.routers.core import router as core_router
+import hashlib
+bearer_scheme = HTTPBearer()
 
-# Create tables
-Base.metadata.create_all(bind=engine)
+# ============================================================
+#API
+# ============================================================
+# Tags metadata for Swagger/Redoc
+TAGS_META = [
+    {"name": "Auth", "description": "OAuth 2.0 connection & authentication."},
+    {"name": "Core", "description": "Core application endpoints."},
+    {"name": "System", "description": "System, health, and monitoring."},
+]
 
+# Prefix → Tag mapping for auto-tagging
+PREFIX_TO_TAG = {
+    "/api/v1/auth": "Auth",
+    "/api/v1/core": "Core",
+    "/health": "System",
+    "/metrics": "System",
+    "/": "System",
+}
+
+def _infer_tag(path: str) -> str:
+    """Infer tag from path prefix."""
+    for p in sorted(PREFIX_TO_TAG, key=len, reverse=True):
+        if path.startswith(p):
+            return PREFIX_TO_TAG[p]
+    return "System"
+
+# ============================================================
+# Lifespan context manager
+# ============================================================
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application startup/shutdown events."""
+    print(" Starting FioTrix AI application...")
+
+    try:
+        Base.metadata.create_all(bind=engine, checkfirst=True)
+        print("Database tables ready")
+    except Exception as e:
+        error_str = str(e)
+        if (
+            "already exists" in error_str
+            and ("idx_" in error_str or "relation" in error_str or "duplicate" in error_str.lower())
+        ):
+            print("Tables or indexes already exist — safe to ignore")
+        else:
+            print(f"Error creating tables: {e}")
+
+    yield
+    print("Shutting down FioTrix application...")
+
+
+# ============================================================
+# App Configuration
+# ============================================================
 app = FastAPI(
     title="OAuth Identity Provider",
-    description="Production-ready OAuth 2.0 Identity Provider with Role-based Access Control",
-    version="1.0.0"
+    description="Production-ready OAuth 2.0 Identity Provider with RBAC",
+    version="1.0.0",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    lifespan=lifespan,
+    openapi_tags=TAGS_META,
 )
-from app.routers.integrated_login import router as auth_router
-app.include_router(auth_router)
+# ============================================================
 # CORS
+# ============================================================
+origins=["http://localhost:5174", "http://127.0.0.1:5174", "https://account.fiotrix.com", "https://ops.fiotrix.com","https://panel.fiotrix.com","https://dejban.fiotrix.com"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
+    # allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-templates = Jinja2Templates(directory="app/templates")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
+# ============================================================
+# Routers
+# ============================================================
+app.include_router(auth_router, prefix="/api/v1/auth", tags=["Auth"])
+app.include_router(core_router, prefix="/api/v1/core", tags=["Core"])
+
+# ============================================================
+# Exception handlers (global)
+# ============================================================
+app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, request_validation_exception_handler)
+app.add_exception_handler(Exception, general_exception_handler)
 
 
-# User Registration Endpoint
-@app.post("/register", response_model=UserResponse)
-async def register_user(user_data: UserRegister, db: Session = Depends(get_db)):
-    """Register a new user"""
-    # Check if user exists
-    if db.query(User).filter(User.username == user_data.username).first():
-        raise HTTPException(status_code=400, detail="Username already exists")
+# ============================================================
+# Health check system
+# ============================================================
+@app.get("/health", tags=["System"], summary="Health check")
+async def health_check():
+    return {"status": "healthy", "timestamp": datetime.utcnow()}
 
-    if db.query(User).filter(User.email == user_data.email).first():
-        raise HTTPException(status_code=400, detail="Email already exists")
+# Root endpoint
+@app.get("/", tags=["System"], summary="Root endpoint")
+async def root():
+    return {
+        "message": "CEOAssist Core API is running",
+        "version": "v1",
+        "status": "healthy",
+    }
 
-    # Create user
-    user = User(
-        username=user_data.username,
-        email=user_data.email,
-        password_hash=hash_password(user_data.password),
-        first_name=user_data.first_name,
-        last_name=user_data.last_name,
-        role=user_data.role
-    )
-
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-
-    return user
+# Debug: list all routes
+@app.get("/__routes__", include_in_schema=False)
+def list_routes():
+    """List all registered routes (debugging)."""
+    out = []
+    for r in app.routes:
+        methods = getattr(r, "methods", None)
+        path = getattr(r, "path", None)
+        name = getattr(r, "name", None)
+        if methods and path:
+            out.append({"methods": sorted(list(methods)), "path": path, "name": name})
+    return sorted(out, key=lambda x: x["path"])
 
 
+# ----------------------------------------------------------------------------------------------------------------------
 # Client Registration Endpoint
-@app.post("/register-client", response_model=ClientResponse)
+# ----------------------------------------------------------------------------------------------------------------------
+@app.post("/register-client", response_model=ClientResponse, include_in_schema=False)
 async def register_client(client_data: ClientRegister, db: Session = Depends(get_db)):
     """Register a new OAuth client"""
     client_id = f"client_{secrets.token_urlsafe(16)}"
@@ -86,38 +166,10 @@ async def register_client(client_data: ClientRegister, db: Session = Depends(get
         "redirect_uris": client_data.redirect_uris
     }
 
-
-# OAuth Authorization Endpoint
-# @app.get("/authorize")
-# async def authorize(
-#         client_id: str,
-#         redirect_uri: str,
-#         scope: str,
-#         state: str,
-#         response_type: str,
-#         db: Session = Depends(get_db),
-# ):
-#     if response_type != "code":
-#         raise HTTPException(status_code=400, detail="Invalid response_type")
-#
-#     client = db.query(OAuth2Client).filter(
-#         OAuth2Client.client_id == client_id,
-#         OAuth2Client.is_active == True
-#     ).first()
-#
-#     if not client:
-#         raise HTTPException(status_code=400, detail="Invalid client")
-#
-#     redirect_uris = json.loads(client.redirect_uris)
-#     if redirect_uri not in redirect_uris:
-#         raise HTTPException(status_code=400, detail="Invalid redirect URI")
-#
-#     return RedirectResponse(
-#         url=f"/login?client_id={client_id}&redirect_uri={redirect_uri}&scope={scope}&state={state}"
-#     )
-
+# ----------------------------------------------------------------------------------------------------------------------
 # Replace the existing /authorize endpoint with this:
-@app.post("/authorize", response_model=AuthorizeResponse)
+# ----------------------------------------------------------------------------------------------------------------------
+@app.post("/authorize", response_model=AuthorizeResponse, include_in_schema=False)
 async def authorize(request: AuthorizeRequest, db: Session = Depends(get_db)):
     """Validate OAuth client and return client info for frontend"""
     if request.response_type != "code":
@@ -155,43 +207,10 @@ async def authorize(request: AuthorizeRequest, db: Session = Depends(get_db)):
         state=request.state,
         message="Client validation successful. Proceed with login."
     )
-# Login endpoints (same as before but with role support)
-# @app.get("/login", response_class=HTMLResponse)
-# async def login_form(request: Request, client_id: str, redirect_uri: str, scope: str, state: str):
-#     return templates.TemplateResponse(
-#         "login.html",
-#         {"request": request, "client_id": client_id, "redirect_uri": redirect_uri, "scope": scope, "state": state},
-#     )
-#
-#
-# @app.post("/login")
-# async def login(
-#         username: str = Form(...),
-#         password: str = Form(...),
-#         client_id: str = Form(...),
-#         redirect_uri: str = Form(...),
-#         scope: str = Form(...),
-#         state: str = Form(...),
-#         db: Session = Depends(get_db),
-# ):
-#     user = authenticate_user(db, username, password)
-#     if not user:
-#         raise HTTPException(status_code=401, detail="Invalid credentials")
-#
-#     # Update last login
-#     user.last_login = datetime.utcnow()
-#     db.commit()
-#
-#     code = generate_authorization_code(db, client_id, user.id, scope)
-#
-#     import urllib.parse
-#     params = {'code': code, 'state': state}
-#     query_string = urllib.parse.urlencode(params)
-#     redirect_url = f"{redirect_uri}?{query_string}"
-#
-#     return RedirectResponse(url=redirect_url, status_code=302)
-#
 
+# ----------------------------------------------------------------------------------------------------------------------
+# login
+# ----------------------------------------------------------------------------------------------------------------------
 @app.post("/login", response_model=LoginResponse)
 async def login(request: LoginRequest, db: Session = Depends(get_db)):
     """Direct login endpoint that returns tokens and user info"""
@@ -216,6 +235,7 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
         "id": user.id,
         "username": user.username,
         "email": user.email,
+        "mobile": user.mobile,
         "first_name": user.first_name,
         "last_name": user.last_name,
         "role": user.role.value,
@@ -231,9 +251,10 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
         scope=tokens["scope"]
     )
 
-
-# Add a new OAuth code generation endpoint:
-@app.post("/oauth/authorize")
+# ----------------------------------------------------------------------------------------------------------------------
+# oauth
+# ----------------------------------------------------------------------------------------------------------------------
+@app.post("/oauth/authorize" , include_in_schema=False)
 async def oauth_authorize(
         username: str = Form(...),
         password: str = Form(...),
@@ -279,246 +300,144 @@ async def oauth_authorize(
     }
 
 
-# Add refresh token endpoint:
+
+# ----------------------------------------------------------------------------------------------------------------------
+# # Add refresh token endpoint:
+# ----------------------------------------------------------------------------------------------------------------------
+
 @app.post("/refresh")
 async def refresh_token(
-        refresh_token: str = Form(...),
-        client_id: str = Form(None),
-        client_secret: str = Form(None),
-        db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db)
 ):
-    """Refresh access token using refresh token"""
+    print("🚀 [refresh_token] called")
 
-    token_obj = db.query(Token).filter(Token.refresh_token == refresh_token).first()
-    if not token_obj or token_obj.expires_at < datetime.utcnow():
+    # 🔹 گرفتن refresh_token از cookie
+    refresh_token = request.cookies.get("refresh_token")
+    print(f"🔹 refresh_token from cookie: {refresh_token[:10]}..." if refresh_token else "❌ No refresh_token cookie found")
+
+    if not refresh_token:
+        raise HTTPException(status_code=400, detail="Refresh token not provided")
+
+    refresh_hash = hash_token(refresh_token)
+    print(f"🔹 refresh_hash: {refresh_hash}")
+
+    token_obj = db.query(Token).filter(
+        Token.refresh_token == refresh_hash,
+        Token.revoked == False
+    ).first()
+
+    if not token_obj:
+        print("❌ Token not found or revoked")
         raise HTTPException(status_code=400, detail="Invalid or expired refresh token")
 
-    # Validate client if provided
-    if client_id and client_secret:
-        if not validate_client(db, client_id, client_secret):
-            raise HTTPException(status_code=401, detail="Invalid client credentials")
+    if token_obj.expires_at < datetime.utcnow():
+        print("❌ Token expired")
+        raise HTTPException(status_code=400, detail="Expired refresh token")
 
+    # 🔹 گرفتن user
     user = db.query(User).filter(User.id == token_obj.user_id).first()
-    if not user or user.status != "active":
+    if not user:
+        print("❌ User not found")
+        raise HTTPException(status_code=401, detail="User not found")
+
+    if user.status != "active":
+        print(f"❌ User inactive: {user.status}")
         raise HTTPException(status_code=401, detail="User not active")
 
-    # Generate new tokens
-    new_tokens = generate_tokens(db, token_obj.client_id, token_obj.user_id, token_obj.scope, user.role.value)
+    # 🔹 revoke توکن قدیمی
+    token_obj.revoked = True
 
-    # Delete old refresh token
-    db.delete(token_obj)
+    # 🔹 ساخت توکن جدید
+    new_tokens = generate_tokens(
+        db=db,
+        client_id=token_obj.client_id,
+        user_id=token_obj.user_id,
+        scope=token_obj.scope,
+        role=user.role.value
+    )
+
+    token_obj.replaced_by = hash_token(new_tokens["refresh_token"])
     db.commit()
+    print("💾 Tokens updated and committed")
 
-    # Prepare user info
-    user_info = {
-        "id": user.id,
-        "username": user.username,
-        "email": user.email,
-        "first_name": user.first_name,
-        "last_name": user.last_name,
-        "role": user.role.value,
-        "status": user.status.value
-    }
-
-    return {
-        "access_token": new_tokens["access_token"],
-        "refresh_token": new_tokens["refresh_token"],
+    # ✅ ست‌کردن کوکی جدید
+    response = JSONResponse(content={
         "expires_in": new_tokens["expires_in"],
         "token_type": new_tokens["token_type"],
         "scope": new_tokens["scope"],
-        "user": user_info
-    }
-
-
-
-# Token endpoint with role support
-# @app.post("/token", response_model=TokenResponse)
-# async def token(
-#         request: Request,
-#         db: Session = Depends(get_db),
-#         grant_type: str = Form(None),
-#         code: str = Form(None),
-#         refresh_token: str = Form(None),
-#         client_id: str = Form(None),
-#         client_secret: str = Form(None),
-#         redirect_uri: str = Form(None),
-# ):
-#     # Handle JSON requests
-#     if not grant_type:
-#         try:
-#             json_data = await request.json()
-#             grant_type = json_data.get("grant_type")
-#             code = json_data.get("code")
-#             refresh_token = json_data.get("refresh_token")
-#             client_id = json_data.get("client_id")
-#             client_secret = json_data.get("client_secret")
-#             redirect_uri = json_data.get("redirect_uri")
-#         except:
-#             pass
-#
-#     if not grant_type:
-#         raise HTTPException(status_code=400, detail="Missing grant_type")
-#
-#     if grant_type == "authorization_code":
-#         if not code or not client_id or not client_secret:
-#             raise HTTPException(status_code=400, detail="Missing required parameters")
-#
-#         auth_code = db.query(AuthorizationCode).filter(
-#             AuthorizationCode.code == code,
-#             AuthorizationCode.used == False
-#         ).first()
-#
-#         if not auth_code or auth_code.expires_at < datetime.utcnow():
-#             raise HTTPException(status_code=400, detail="Invalid or expired code")
-#
-#         if not validate_client(db, client_id, client_secret):
-#             raise HTTPException(status_code=401, detail="Invalid client credentials")
-#
-#         user = db.query(User).filter(User.id == auth_code.user_id).first()
-#         tokens = generate_tokens(db, client_id, auth_code.user_id, auth_code.scope, user.role.value)
-#
-#         # Mark code as used
-#         auth_code.used = True
-#         db.commit()
-#
-#         return tokens
-#
-#     elif grant_type == "refresh_token":
-#         if not refresh_token or not client_id or not client_secret:
-#             raise HTTPException(status_code=400, detail="Missing required parameters")
-#
-#         token_obj = db.query(Token).filter(Token.refresh_token == refresh_token).first()
-#         if not token_obj or token_obj.expires_at < datetime.utcnow():
-#             raise HTTPException(status_code=400, detail="Invalid or expired refresh token")
-#
-#         if not validate_client(db, client_id, client_secret):
-#             raise HTTPException(status_code=401, detail="Invalid client credentials")
-#
-#         user = db.query(User).filter(User.id == token_obj.user_id).first()
-#         tokens = generate_tokens(db, client_id, token_obj.user_id, token_obj.scope, user.role.value)
-#
-#         db.delete(token_obj)
-#         db.commit()
-#
-#         return tokens
-#
-#     raise HTTPException(status_code=400, detail="Unsupported grant type")
-
-
-# Update the existing token endpoint to also return user info:
-@app.post("/token", response_model=LoginResponse)  # Changed response model
-async def token(
-        request: Request,
-        db: Session = Depends(get_db),
-        grant_type: str = Form(None),
-        code: str = Form(None),
-        refresh_token: str = Form(None),
-        client_id: str = Form(None),
-        client_secret: str = Form(None),
-        redirect_uri: str = Form(None),
-):
-    """Enhanced token endpoint that returns user info along with tokens"""
-
-    # Handle JSON requests
-    if not grant_type:
-        try:
-            json_data = await request.json()
-            grant_type = json_data.get("grant_type")
-            code = json_data.get("code")
-            refresh_token = json_data.get("refresh_token")
-            client_id = json_data.get("client_id")
-            client_secret = json_data.get("client_secret")
-            redirect_uri = json_data.get("redirect_uri")
-        except:
-            pass
-
-    if not grant_type:
-        raise HTTPException(status_code=400, detail="Missing grant_type")
-
-    if grant_type == "authorization_code":
-        if not code or not client_id or not client_secret:
-            raise HTTPException(status_code=400, detail="Missing required parameters")
-
-        auth_code = db.query(AuthorizationCode).filter(
-            AuthorizationCode.code == code,
-            AuthorizationCode.used == False
-        ).first()
-
-        if not auth_code or auth_code.expires_at < datetime.utcnow():
-            raise HTTPException(status_code=400, detail="Invalid or expired code")
-
-        if not validate_client(db, client_id, client_secret):
-            raise HTTPException(status_code=401, detail="Invalid client credentials")
-
-        user = db.query(User).filter(User.id == auth_code.user_id).first()
-        tokens = generate_tokens(db, client_id, auth_code.user_id, auth_code.scope, user.role.value)
-
-        # Mark code as used
-        auth_code.used = True
-        db.commit()
-
-        # Prepare user info
-        user_info = {
-            "id": user.id,
+        "user": {
+            "id": str(user.id),
             "username": user.username,
             "email": user.email,
+            "mobile": user.mobile,
             "first_name": user.first_name,
             "last_name": user.last_name,
             "role": user.role.value,
-            "status": user.status.value
+            "status": user.status.value,
         }
+    })
 
-        return LoginResponse(
-            access_token=tokens["access_token"],
-            refresh_token=tokens["refresh_token"],
-            expires_in=tokens["expires_in"],
-            token_type=tokens["token_type"],
-            user=user_info,
-            scope=tokens["scope"]
-        )
+    response.set_cookie(
+        key="refresh_token",
+        value=new_tokens["refresh_token"],
+        domain=".fiotrix.com",
+        path="/",
+        httponly=True,
+        secure=True,
+        samesite="None",
+        max_age=settings.REFRESH_TOKEN_EXPIRE_MINUTES * 60 - 2
+    )
+    response.set_cookie(
+        key="access_token",
+        value=new_tokens["access_token"],
+        httponly=True,
+        domain=".fiotrix.com",
+        secure=True,
+        samesite="Lax",
+        path="/",
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60 - 2
+    )
+    print("✅ Refresh successful")
+    return response
 
-    elif grant_type == "refresh_token":
-        if not refresh_token or not client_id or not client_secret:
-            raise HTTPException(status_code=400, detail="Missing required parameters")
 
-        token_obj = db.query(Token).filter(Token.refresh_token == refresh_token).first()
-        if not token_obj or token_obj.expires_at < datetime.utcnow():
-            raise HTTPException(status_code=400, detail="Invalid or expired refresh token")
-
-        if not validate_client(db, client_id, client_secret):
-            raise HTTPException(status_code=401, detail="Invalid client credentials")
-
-        user = db.query(User).filter(User.id == token_obj.user_id).first()
-        tokens = generate_tokens(db, client_id, token_obj.user_id, token_obj.scope, user.role.value)
-
-        db.delete(token_obj)
-        db.commit()
-
-        # Prepare user info
-        user_info = {
-            "id": user.id,
-            "username": user.username,
-            "email": user.email,
-            "first_name": user.first_name,
-            "last_name": user.last_name,
-            "role": user.role.value,
-            "status": user.status.value
-        }
-
-        return LoginResponse(
-            access_token=tokens["access_token"],
-            refresh_token=tokens["refresh_token"],
-            expires_in=tokens["expires_in"],
-            token_type=tokens["token_type"],
-            user=user_info,
-            scope=tokens["scope"]
-        )
-
+# ----------------------------------------------------------------------------------------------------------------------
 # UserInfo endpoint with role information
-@app.get("/userinfo", response_model=UserInfo)
+# ----------------------------------------------------------------------------------------------------------------------
+#====V2=====#
+@app.get("/userinfo", response_model=UserInfo, include_in_schema=False)
 async def userinfo(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    def fingerprint_of_key(pem_str: str) -> str:
+        return hashlib.sha256(pem_str.encode()).hexdigest()[:12]
+
+    print("🔸 [userinfo] incoming Authorization token start:", (token or "")[:60])
     try:
-        payload = jwt.decode(token, public_key, algorithms=[settings.ALGORITHM])
+        header = jwt.get_unverified_header(token)
+        print("🔸 [userinfo] token header:", header)
+    except Exception as e:
+        print("🔸 [userinfo] cannot read token header:", repr(e))
+
+    print("🔸 [userinfo] expected algorithm:", settings.ALGORITHM)
+    print("🔸 [userinfo] expected audience:", settings.OAUTH_CLIENT_ID)
+    print("🔸 [userinfo] expected issuer:", getattr(settings, "OAUTH_ISSUER", "oauth-idp"))
+
+    try:
+        pub_pem = public_key if isinstance(public_key, str) else public_key.public_bytes(...)
+        print("🔸 [userinfo] public key fingerprint:", fingerprint_of_key(pub_pem))
+    except Exception as e:
+        print("🔸 [userinfo] unable to fingerprint public key:", repr(e))
+
+    try:
+        payload = jwt.decode(
+            token,
+            public_key,
+            algorithms=[settings.ALGORITHM],
+            audience=settings.OAUTH_CLIENT_ID,
+            issuer=getattr(settings, "OAUTH_ISSUER", "oauth-idp")
+        )
+        print("✅ [userinfo] Token decoded successfully:", payload)
+
         user = db.query(User).filter(User.id == UUID(payload["sub"])).first()
         if not user:
             raise HTTPException(status_code=401, detail="Invalid token")
@@ -527,23 +446,29 @@ async def userinfo(token: str = Depends(oauth2_scheme), db: Session = Depends(ge
             sub=str(user.id),
             username=user.username,
             email=user.email,
+            mobile=user.mobile,
             first_name=user.first_name,
             last_name=user.last_name,
             role=user.role.value,
-            status=user.status.value
+            status=user.status.value,
         )
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
 
+    except JWTError as e:
+        print("❌ [userinfo] JWT decode failed:", type(e).__name__, str(e))
+        raise HTTPException(status_code=401, detail=f"Invalid token: {type(e).__name__} {str(e)}")
+    except Exception as e:
+        print("❌ [userinfo] Unexpected error during decode:", repr(e))
+        raise
 
+# ----------------------------------------------------------------------------------------------------------------------
 # JWKS endpoint
-@app.get("/.well-known/jwks.json")
+# ----------------------------------------------------------------------------------------------------------------------
+#====V2=====#
+@app.get("/.well-known/jwks.json" , include_in_schema=False)
 async def jwks():
     public_numbers = public_key.public_numbers()
 
-    # Convert integers to base64url
     import base64
-
     def int_to_base64url(val):
         byte_length = (val.bit_length() + 7) // 8
         bytes_val = val.to_bytes(byte_length, 'big')
@@ -555,36 +480,82 @@ async def jwks():
                 "kty": "RSA",
                 "use": "sig",
                 "alg": "RS256",
+                "kid": "1",  # شناسه کلید (برای rotation بعدی تغییر می‌کنی)
                 "n": int_to_base64url(public_numbers.n),
                 "e": int_to_base64url(public_numbers.e),
             }
         ]
     }
+# ============================================================
+# logout
+# ============================================================
+@app.post("/logout")
+async def logout(request: Request, db: Session = Depends(get_db)):
+    """
+    Logout endpoint that revokes tokens stored in cookies.
+    """
+    print("🚪 [logout] called")
 
+    access_token = request.cookies.get("access_token")
+    refresh_token = request.cookies.get("refresh_token")
 
-# Admin endpoints for user management
-@app.get("/admin/users", response_model=List[UserResponse])
-async def list_users(db: Session = Depends(get_db)):
-    """Admin endpoint to list all users"""
-    users = db.query(User).all()
-    return users
+    if not access_token and not refresh_token:
+        print("❌ No cookies found")
+        raise HTTPException(status_code=400, detail="No active session")
 
+    revoked_any = False
 
-@app.put("/admin/users/{user_id}/role")
-async def update_user_role(user_id: int, role: UserRoleSchema, db: Session = Depends(get_db)):
-    """Admin endpoint to update user role"""
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    # 🔹 Revoke refresh token if exists
+    if refresh_token:
+        refresh_hash = hash_token(refresh_token)
+        token_obj = db.query(Token).filter(
+            Token.refresh_token == refresh_hash,
+            Token.revoked == False
+        ).first()
+        if token_obj:
+            token_obj.revoked = True
+            token_obj.revoked_at = datetime.utcnow()
+            revoked_any = True
 
-    user.role = role
-    user.updated_at = datetime.utcnow()
-    db.commit()
+    # 🔹 Commit revocations
+    if revoked_any:
+        db.commit()
+        print("✅ Token(s) revoked successfully")
+    else:
+        print("⚠️ No valid token found in DB")
 
-    return {"message": "User role updated successfully"}
+    # 🔹 Prepare response
+    response = JSONResponse(content={"message": "Logout successful"})
 
+    # 🔸 Delete cookies
+    response.delete_cookie(
+        key="access_token",
+        domain=".fiotrix.com",
+        path="/"
+    )
+    response.delete_cookie(
+        key="refresh_token",
+        domain=".fiotrix.com",
+        path="/"
+    )
 
-# Health check
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy", "timestamp": datetime.utcnow()}
+    # 🔹 CORS headers for .fiotrix.com
+    origin = request.headers.get("origin")
+    if origin and origin.endswith(".fiotrix.com"):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+
+    print("🚪 Cookies deleted, logout complete")
+    return response
+# ============================================================
+# App start
+# ============================================================
+# if __name__ == "__main__":
+#     import uvicorn
+#     uvicorn.run(
+#         "app.main:app",
+#         host=settings.HOST,
+#         port=settings.PORT,
+#         reload=settings.DEBUG,
+#     )
